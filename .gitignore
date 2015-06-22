@@ -1,0 +1,103 @@
+library(plyr)
+library(ggplot2)
+library(scales)
+library(grid)
+library(truncnorm)
+library(reshape2)
+library(vegan)
+
+
+#Non-package functons
+ggplotcolors <- function(n, h=c(0, 360) +15){
+  if ((diff(h)%%360) < 1) h[2] <- h[2] - 360/n
+  hcl(h = (seq(h[1], h[2], length = n)), c = 100, l = 45)
+}
+
+#Compare two means using the balanced bootstrap approach
+j.bal <- function(a,b,n){
+  diff.observed <- abs(mean(b) - mean(a))
+  shuffled <- rep(c(a,b),n)
+  shuffled <- sample(shuffled,length(shuffled))
+  a.random <- colMeans(matrix(shuffled[1:(length(a)*n)],nrow=length(a),ncol=n))
+  b.random <- colMeans(matrix(shuffled[(length(a)*n+1):length(shuffled)],nrow=length(b),ncol=n))
+  diff.random <- c(scale(b.random-a.random,scale=F),diff.observed)
+  pvalue <- round(sum(abs(diff.random) >= diff.observed) / (n+1), floor(log10((n+1))))
+  critical <- min(sort(abs(diff.random),decreasing=T)[1:(0.05*(n+1))])
+  extreme <- length(diff.random[which(abs(diff.random)>=diff.observed)])
+  #Output
+  list("dist" = diff.random, #bootstrapped distribution
+       "obs" = diff.observed, #observed difference in means
+       "crit" = critical, #smallest significant difference at p=0.05
+       "p" = pvalue, #two-tailed p value
+       "extreme" = extreme) #number of results more extreme than observed
+}
+
+#Generate 95% CI for slope and r2 using the balanced bootstrap approach
+lm.bal <- function(x,y,n=1000){
+  slope.observed <- cov(x,y)/var(x)
+  r2.observed <- cor(x,y)^2
+  random <- cbind(rep(x,n-1),rep(y,n-1),sample(1:((n-1)*(length(x)))))
+  random <- as.data.frame(cbind(random[order(random[,3]),][,1:2],sort(rep(1:(n-1),length(x)))))
+  colnames(random) <- c("x","y","rep")
+  dist <- ddply(random,.(rep),summarize,slope=cov(x,y)/var(x),r2=cor(x,y)^2)[,2:3]
+  dist[n,] <- c(slope.observed,r2.observed)
+  slope.95ci <- c(sort(dist$slope)[(n*0.025)],sort(dist$slope)[(n*0.975)])
+  sig.slope <- ifelse((sign(slope.95ci[1])==sign(slope.95ci[2]))==T,"< 0.05","> 0.05")
+  r2.95ci <- c(sort(dist$r2)[(n*0.025)],sort(dist$r2)[(n*0.975)])
+  #Output
+  list("dist" = dist, #bootstrapped distribution
+       "slope.observed" = slope.observed, #observed OLS slope
+       "slope.sig" = sig.slope, #Test for overlap of 95% with 0; significance implies non-overlap
+       "slope.95ci" = slope.95ci, #95% confidence intervals for the slope
+       "r2.observed" = r2.observed, #observed pearson's r^2
+       "r2.95ci" = r2.95ci #95% Confidence Intervals for R2
+  )
+}
+
+
+#Location options: tl, tr, bl, br - i.e., top-left, top-right, bottom-left, bottom-right
+
+lm_eqn = function(x,y,location="tl",n=1000,ys=1,xs=1){
+  m = lm.bal(x,y,n);
+  eq = list(substitute(list(m~"="~b~"("*blow,bhigh*")"),
+                       list(b = format(m$slope.observed, digits =3),
+                            blow = format(m$slope.95ci[1], digits=3),
+                            bhigh = format(m$slope.95ci[2], digits=3))),
+            substitute(list(r^2~"="~r2~"("*r2low,r2high*")"),
+                       list(r2 = format(m$r2.observed, digits=2),
+                            r2low = format(m$r2.95ci[1], digits=2),
+                            r2high = format(m$r2.95ci[2], digits=2))),
+            substitute(list(p^phantom(0)*pv),
+                       list(pv = m$slope.sig)))
+  xr = max(x)-min(x)
+  yr = max(y)-min(y)
+  if(location=="tl"){
+    xloc <- rep(min(x),3)
+    yloc <- c(max(y),max(y)-0.05*yr*ys,max(y)-0.11*yr*ys)
+  }
+  if(location=="tr"){
+    xloc <- rep(max(x)-0.2*xr*xs,3)
+    yloc <- c(max(y),max(y)-0.05*yr*ys,max(y)-0.11*yr)
+  }
+  if(location=="bl"){
+    xloc <- rep(min(x),3)
+    yloc <- c(min(y)+0.11*yr*ys,min(y)+0.05*yr*ys,min(y))
+  }
+  if(location=="br"){
+    xloc <- rep(max(x)-0.2*xr*xs,3)
+    yloc <- c(min(y)+0.11*yr*ys,min(y)+0.05*yr*ys,min(y))
+  }
+  annotate("text",parse=T,hjust=0,x=xloc,y=yloc,label=as.character(as.expression(eq)))
+}
+
+
+#Set Global Plot Theme
+
+theme_set(theme_bw())
+theme_update(axis.title.x = element_text(size=18, vjust=0.25),
+             axis.title.y = element_text(size=18, angle=90),
+             axis.text    = element_text(size=20),
+             panel.grid   = element_blank(),
+             strip.text   = element_text(size=20),
+             legend.title = element_text(size=17),
+             legend.text  = element_text(size=17))
