@@ -90,6 +90,15 @@ lm_eqn = function(x,y,location="tl",n=1000,ys=1,xs=1){
   annotate("text",parse=T,hjust=0,x=xloc,y=yloc,label=as.character(as.expression(eq)))
 }
 
+one.samp.bal <- function(a,n=5000){
+  ran.a <- cbind(matrix(sample(rep(a,n-1)),nrow=length(a)),a)
+  dist <- sort(colMeans(ran.a))
+  output <- list("mean" = mean(dist),
+                 "ci2.5" = dist[0.025*length(dist)],
+                 "ci97.5" = dist[0.975*length(dist)])
+  output
+}
+
 
 #Set Global Plot Theme
 
